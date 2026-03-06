@@ -26,6 +26,7 @@ AGENT_NAMES=(
   accessibility-review
   api-review
   data-integrity
+  database-review
 )
 
 # Colors (disabled if not a terminal)

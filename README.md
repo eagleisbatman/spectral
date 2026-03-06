@@ -21,6 +21,7 @@ Works with **Claude Code**, **Cursor**, and **Codex CLI**.
 | **accessibility-review** | WCAG 2.1 AA, keyboard nav, screen readers, ARIA | "Can everyone use this?" |
 | **api-review** | Endpoint consistency, contracts, error responses | "Is this API well-designed?" |
 | **data-integrity** | Transactions, race conditions, schema, data loss | "Can data be corrupted or lost?" |
+| **database-review** | Schema design, SQL queries, indexes, migrations, ORM usage | "Is the database layer correct and fast?" |
 
 ---
 
@@ -72,8 +73,8 @@ It also updates instruction files (`~/.claude/CLAUDE.md`, `.cursorrules`, `AGENT
 ```
 
 ```
-  + Claude Code: installed (9/9 agents)
-  + Cursor: installed (9/9 rules)
+  + Claude Code: installed (10/10 agents)
+  + Cursor: installed (10/10 rules)
   > Codex: detected, not installed
 ```
 
