@@ -10,7 +10,7 @@ set -uo pipefail
 # We handle errors manually instead of set -e to avoid && short-circuit traps.
 # Every external command that matters is checked explicitly.
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENTS_DIR="$SCRIPT_DIR/agents"
 SPECTRAL_TMPDIR=""
@@ -190,6 +190,7 @@ You have access to Spectral review agents. Use them proactively after completing
 - **accessibility-review**: WCAG 2.1 AA compliance
 - **api-review**: API design consistency and contracts
 - **data-integrity**: Data corruption and loss vectors
+- **database-review**: Schema design, query performance, migrations, indexes
 EOF
 }
 
@@ -207,6 +208,7 @@ You have Spectral review agents available in .cursor/rules/. When the user asks 
 - @spectral-accessibility-review — WCAG compliance
 - @spectral-api-review — API design
 - @spectral-data-integrity — data safety
+- @spectral-database-review — schema, queries, migrations, indexes
 EOF
 }
 
@@ -226,6 +228,7 @@ Available agents:
 - **accessibility-review** — WCAG 2.1 AA compliance
 - **api-review** — API design consistency and contracts
 - **data-integrity** — data corruption and loss vectors
+- **database-review** — schema design, query performance, migrations, indexes
 EOF
 }
 
@@ -325,6 +328,8 @@ install_cursor() {
     if [ -z "$desc" ]; then
       desc="Spectral $name review agent"
     fi
+    # Escape double quotes for YAML
+    desc="${desc//\"/\\\"}"
     # Truncate description to 200 chars for Cursor
     if [ ${#desc} -gt 200 ]; then
       desc="${desc:0:197}..."
