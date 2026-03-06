@@ -4,7 +4,7 @@
 
 Spectral is a collection of specialized review agents for AI coding tools. Each agent is a self-contained prompt that turns your AI assistant into an autonomous reviewer — it doesn't just list problems, it fixes them, runs the build, and keeps going until the codebase passes its quality gate.
 
-Works with **Claude Code**, **Cursor**, **Windsurf**, **Codex CLI**, and any AI tool that supports system prompts or custom rules.
+Works with **Claude Code**, **Cursor**, and **Codex CLI**.
 
 ---
 
@@ -46,16 +46,23 @@ cd spectral
 ./spectral install
 ```
 
-The CLI auto-detects which AI tools you have and installs agents to the right locations. It also updates your instruction files (`CLAUDE.md`, `.cursorrules`, `.windsurfrules`, `codex.md`) so the AI knows the agents exist.
+The CLI auto-detects which tools you have and installs agents in the correct format for each:
 
-> **Linux users:** If your tool isn't auto-detected (e.g. Flatpak/AppImage installs), specify it explicitly: `./spectral install cursor`
+| Tool | What gets installed | How |
+|---|---|---|
+| **Claude Code** | `~/.claude/agents/*.md` | Native agent files with YAML frontmatter |
+| **Cursor** | `.cursor/rules/spectral-*.mdc` | `.mdc` rules with Cursor frontmatter (`description`, `alwaysApply: false`) |
+| **Codex CLI** | `AGENTS.md` | Appends agent instructions — [Codex auto-discovers this file](https://developers.openai.com/codex/guides/agents-md/) |
+
+It also updates instruction files (`~/.claude/CLAUDE.md`, `.cursorrules`, `AGENTS.md`) so the AI knows the agents exist.
+
+> **Linux users:** If your tool isn't auto-detected (e.g. Flatpak/AppImage), specify it explicitly: `./spectral install cursor`
 
 ### Install for specific tools
 
 ```bash
 ./spectral install claude-code         # Just Claude Code
-./spectral install cursor windsurf     # Multiple tools
-./spectral install codex               # Just Codex CLI
+./spectral install cursor codex        # Multiple tools
 ```
 
 ### Check status
@@ -67,8 +74,7 @@ The CLI auto-detects which AI tools you have and installs agents to the right lo
 ```
   + Claude Code: installed (9/9 agents)
   + Cursor: installed (9/9 rules)
-  > Windsurf: not detected
-  > Codex: not detected
+  > Codex: detected, not installed
 ```
 
 ### Update
@@ -89,15 +95,6 @@ Re-running `install` updates both agent files and instruction blocks.
 ./spectral help                        # Full usage
 ```
 
-### Where things go
-
-| Tool | Agents | Instructions updated |
-|---|---|---|
-| Claude Code | `~/.claude/agents/*.md` | `~/.claude/CLAUDE.md` |
-| Cursor | `.cursor/rules/spectral-*.mdc` | `.cursorrules` |
-| Windsurf | `.windsurf/rules/spectral-*.md` | `.windsurfrules` |
-| Codex CLI | `.codex/spectral/*.md` | `codex.md` |
-
 ### Manual
 
 Copy any `.md` file from `agents/` into your tool's prompt/rules directory. They're self-contained — no dependencies.
@@ -106,19 +103,19 @@ Copy any `.md` file from `agents/` into your tool's prompt/rules directory. They
 
 ## Usage Examples
 
+**Claude Code:**
 ```
-# Full review (security + ops + maintainability)
 Run the full-spectrum review
+Run a security audit on src/auth/
+Review this project's architecture
+```
 
-# Focused reviews
-Run a security audit
-Review the architecture
-Check performance of the database layer
-Review code quality of src/components/
-Run a UX review on the checkout flow
-Audit accessibility of the form components
-Review the API design
-Check data integrity in the payment module
+**Cursor:** Reference with `@spectral-full-spectrum`, `@spectral-security-audit`, etc.
+
+**Codex CLI:**
+```bash
+codex "Run the full-spectrum review from AGENTS.md"
+codex "Follow the security-audit instructions to audit this project"
 ```
 
 ---
