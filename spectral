@@ -118,29 +118,6 @@ extract_agent_body() {
   awk 'BEGIN{fm=0} /^---$/{fm++; if(fm==2){next}} fm>=2{print}' "$file"
 }
 
-# Extract a YAML field value from frontmatter
-extract_frontmatter_field() {
-  local file="$1"
-  local field="$2"
-  awk -v f="$field" '
-    /^---$/ { fm++; next }
-    fm==1 && $0 ~ "^"f":" {
-      sub("^"f":[ ]*", "")
-      # Handle multi-line (take first line for single-value fields)
-      if ($0 ~ /\|/) { next }
-      gsub(/^["'\'']|["'\'']$/, "")
-      print
-      exit
-    }
-    fm==1 && found && /^  / {
-      gsub(/^  /, "")
-      print
-      exit
-    }
-    fm>=2 { exit }
-  ' "$file"
-}
-
 # Extract the first content line of the multi-line description
 extract_description_first_line() {
   local file="$1"
