@@ -1,0 +1,673 @@
+#!/bin/bash
+# ============================================================================
+# Spectral CLI
+# Autonomous code review agents for AI coding tools.
+# https://github.com/eagleisbatman/spectral
+# ============================================================================
+
+set -uo pipefail
+
+# We handle errors manually instead of set -e to avoid && short-circuit traps.
+# Every external command that matters is checked explicitly.
+
+VERSION="1.0.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AGENTS_DIR="$SCRIPT_DIR/agents"
+SPECTRAL_TMPDIR=""
+
+# Agent names (single source of truth)
+AGENT_NAMES=(
+  full-spectrum
+  security-audit
+  architecture-review
+  performance-review
+  code-quality
+  ux-review
+  accessibility-review
+  api-review
+  data-integrity
+)
+
+# Colors (disabled if not a terminal)
+if [ -t 1 ]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  BLUE='\033[0;34m'
+  CYAN='\033[0;36m'
+  DIM='\033[2m'
+  BOLD='\033[1m'
+  NC='\033[0m'
+else
+  RED='' GREEN='' YELLOW='' BLUE='' CYAN='' DIM='' BOLD='' NC=''
+fi
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+print_banner() {
+  echo ""
+  echo -e "${BOLD}  ╔═══════════════════════════════════════╗${NC}"
+  echo -e "${BOLD}  ║         ${CYAN}S P E C T R A L${NC}${BOLD}               ║${NC}"
+  echo -e "${BOLD}  ║   ${DIM}autonomous code review agents${NC}${BOLD}       ║${NC}"
+  echo -e "${BOLD}  ╚═══════════════════════════════════════╝${NC}"
+  echo ""
+}
+
+info()    { echo -e "  ${BLUE}>${NC} $1"; }
+success() { echo -e "  ${GREEN}+${NC} $1"; }
+warn()    { echo -e "  ${YELLOW}!${NC} $1"; }
+err()     { echo -e "  ${RED}x${NC} $1"; }
+header()  { echo -e "\n  ${BOLD}$1${NC}"; }
+
+ensure_agents() {
+  if [ ! -d "$AGENTS_DIR" ]; then
+    info "Agents not found locally. Cloning..."
+    SPECTRAL_TMPDIR=$(mktemp -d)
+    if git clone --depth 1 https://github.com/eagleisbatman/spectral.git "$SPECTRAL_TMPDIR/spectral" >/dev/null 2>&1; then
+      AGENTS_DIR="$SPECTRAL_TMPDIR/spectral/agents"
+    else
+      err "Failed to clone spectral repo. Check your network connection."
+      exit 1
+    fi
+    if [ ! -d "$AGENTS_DIR" ]; then
+      err "Cloned repo but agents/ directory not found."
+      exit 1
+    fi
+  fi
+}
+
+cleanup() {
+  if [ -n "${SPECTRAL_TMPDIR:-}" ] && [ -d "$SPECTRAL_TMPDIR" ]; then
+    rm -rf "$SPECTRAL_TMPDIR"
+  fi
+}
+trap cleanup EXIT
+
+count_matching_files() {
+  # Counts files matching a glob pattern safely.
+  # Usage: count_matching_files /path/to/dir "pattern"
+  local dir="$1"
+  local pattern="$2"
+  local count=0
+  if [ -d "$dir" ]; then
+    while IFS= read -r -d '' _; do
+      count=$((count + 1))
+    done < <(find "$dir" -maxdepth 1 -name "$pattern" -type f -print0 2>/dev/null)
+  fi
+  echo "$count"
+}
+
+agent_count() {
+  count_matching_files "$AGENTS_DIR" "*.md"
+}
+
+confirm_prompt() {
+  # Reads confirmation from /dev/tty so it works even when stdin is piped.
+  local message="$1"
+  if [ -t 0 ]; then
+    read -p "$message" confirm
+  elif [ -e /dev/tty ]; then
+    read -p "$message" confirm < /dev/tty
+  else
+    confirm="n"
+  fi
+  [[ "$confirm" == "y" || "$confirm" == "Y" ]]
+}
+
+# ── Detection ────────────────────────────────────────────────────────────────
+
+detect_tools() {
+  DETECTED_TOOLS=()
+
+  # Claude Code — global install
+  if [ -d "$HOME/.claude" ] || command -v claude >/dev/null 2>&1; then
+    DETECTED_TOOLS+=("claude-code")
+  fi
+
+  # Cursor — check for app (macOS + Linux) + project-level dir
+  if [ -d "/Applications/Cursor.app" ] || \
+     [ -d "$HOME/Applications/Cursor.app" ] || \
+     [ -d "$HOME/.config/Cursor" ] || \
+     command -v cursor >/dev/null 2>&1 || \
+     [ -d ".cursor" ]; then
+    DETECTED_TOOLS+=("cursor")
+  fi
+
+  # Windsurf — check for app (macOS + Linux) + project-level dir
+  if [ -d "/Applications/Windsurf.app" ] || \
+     [ -d "$HOME/Applications/Windsurf.app" ] || \
+     [ -d "$HOME/.config/Windsurf" ] || \
+     command -v windsurf >/dev/null 2>&1 || \
+     [ -d ".windsurf" ]; then
+    DETECTED_TOOLS+=("windsurf")
+  fi
+
+  # Codex CLI
+  if command -v codex >/dev/null 2>&1; then
+    DETECTED_TOOLS+=("codex")
+  fi
+}
+
+is_project_root() {
+  [ -f "package.json" ] || [ -f "pyproject.toml" ] || [ -f "Cargo.toml" ] || \
+  [ -f "go.mod" ] || [ -f "Gemfile" ] || [ -f "pubspec.yaml" ] || \
+  [ -f "build.gradle" ] || [ -f "pom.xml" ] || [ -d ".git" ] || \
+  [ -f "Makefile" ] || [ -f "CMakeLists.txt" ] || [ -f "*.sln" ] || \
+  [ -f "composer.json" ] || [ -f "mix.exs" ] || [ -f "Package.swift" ]
+}
+
+warn_if_not_project_root() {
+  local tool_name="$1"
+  if ! is_project_root; then
+    warn "CWD doesn't look like a project root (no package.json, .git, etc.)."
+    warn "$tool_name agents install to the current directory: $(pwd)"
+    if ! confirm_prompt "  Continue? (y/N) "; then
+      return 1
+    fi
+  fi
+  return 0
+}
+
+# ── Spectral block helpers ───────────────────────────────────────────────────
+
+spectral_block_claude() {
+  cat << 'EOF'
+## Spectral Review Agents
+
+You have access to Spectral review agents. Use them proactively after completing implementation tasks or when the user requests a review. Available agents:
+- **full-spectrum**: Comprehensive 3-lens review (security + ops + maintainability)
+- **security-audit**: Deep vulnerability hunting
+- **architecture-review**: Structural health and coupling analysis
+- **performance-review**: Bottleneck and resource usage analysis
+- **code-quality**: Readability, dead code, duplication, test gaps
+- **ux-review**: User experience issues in frontend code
+- **accessibility-review**: WCAG 2.1 AA compliance
+- **api-review**: API design consistency and contracts
+- **data-integrity**: Data corruption and loss vectors
+EOF
+}
+
+spectral_block_cursor() {
+  cat << 'EOF'
+## Spectral Review Agents
+
+You have Spectral review agents available in .cursor/rules/. When the user asks for a code review, use the appropriate spectral agent:
+- @spectral-full-spectrum — full 3-lens review
+- @spectral-security-audit — security vulnerabilities
+- @spectral-architecture-review — structural health
+- @spectral-performance-review — bottlenecks
+- @spectral-code-quality — readability and correctness
+- @spectral-ux-review — user experience
+- @spectral-accessibility-review — WCAG compliance
+- @spectral-api-review — API design
+- @spectral-data-integrity — data safety
+EOF
+}
+
+spectral_block_windsurf() {
+  cat << 'EOF'
+## Spectral Review Agents
+
+You have Spectral review agents in .windsurf/rules/. Use them when the user asks for code reviews:
+- spectral-full-spectrum — full 3-lens review
+- spectral-security-audit — security vulnerabilities
+- spectral-architecture-review — structural health
+- spectral-performance-review — bottlenecks
+- spectral-code-quality — readability and correctness
+- spectral-ux-review — user experience
+- spectral-accessibility-review — WCAG compliance
+- spectral-api-review — API design
+- spectral-data-integrity — data safety
+EOF
+}
+
+spectral_block_codex() {
+  cat << 'EOF'
+## Spectral Review Agents
+
+Review agent instructions are available in `.codex/spectral/`. When the user asks for a code review, read the relevant agent file and follow its instructions:
+- `.codex/spectral/full-spectrum.md` — full 3-lens review
+- `.codex/spectral/security-audit.md` — security vulnerabilities
+- `.codex/spectral/architecture-review.md` — structural health
+- `.codex/spectral/performance-review.md` — bottlenecks
+- `.codex/spectral/code-quality.md` — readability and correctness
+- `.codex/spectral/ux-review.md` — user experience
+- `.codex/spectral/accessibility-review.md` — WCAG compliance
+- `.codex/spectral/api-review.md` — API design
+- `.codex/spectral/data-integrity.md` — data safety
+EOF
+}
+
+upsert_spectral_block() {
+  # Inserts or replaces the spectral block in a file.
+  # $1 = file path, $2 = block generator function, $3 = display label
+  local file="$1"
+  local block_fn="$2"
+  local label="$3"
+
+  if [ -f "$file" ] && grep -q "Spectral Review Agents" "$file" 2>/dev/null; then
+    # Replace existing block
+    local tmp
+    tmp=$(mktemp)
+    awk '
+      /^## Spectral Review Agents/ { skip=1; next }
+      /^## / { if (skip) { skip=0 } }
+      !skip
+    ' "$file" > "$tmp"
+    # Append fresh block
+    echo "" >> "$tmp"
+    $block_fn >> "$tmp"
+    mv "$tmp" "$file"
+    success "$label: Updated Spectral block in $file"
+  elif [ -f "$file" ]; then
+    echo "" >> "$file"
+    $block_fn >> "$file"
+    success "$label: Added Spectral reference to $file"
+  else
+    $block_fn > "$file"
+    success "$label: Created $file"
+  fi
+}
+
+remove_spectral_block() {
+  # Removes the spectral block from a file.
+  # $1 = file path, $2 = display label
+  local file="$1"
+  local label="$2"
+
+  if [ -f "$file" ] && grep -q "Spectral Review Agents" "$file" 2>/dev/null; then
+    local tmp
+    tmp=$(mktemp)
+    awk '
+      /^## Spectral Review Agents/ { skip=1; next }
+      /^## / { if (skip) { skip=0 } }
+      !skip
+    ' "$file" > "$tmp"
+    # Remove trailing blank lines
+    if command -v perl >/dev/null 2>&1; then
+      perl -pi -e 'chomp if eof' "$tmp"
+    fi
+    mv "$tmp" "$file"
+    # If file is now empty (or only whitespace), remove it
+    if [ ! -s "$file" ] || ! grep -q '[^[:space:]]' "$file" 2>/dev/null; then
+      rm -f "$file"
+      success "$label: Removed $file (was Spectral-only)"
+    else
+      success "$label: Removed Spectral block from $file"
+    fi
+  fi
+}
+
+# ── Install Functions ────────────────────────────────────────────────────────
+
+install_claude_code() {
+  local target="$HOME/.claude/agents"
+  mkdir -p "$target"
+
+  local count=0
+  for agent in "$AGENTS_DIR"/*.md; do
+    [ -f "$agent" ] || continue
+    cp "$agent" "$target/$(basename "$agent")"
+    count=$((count + 1))
+  done
+  success "Claude Code: $count agents -> $target"
+
+  upsert_spectral_block "$HOME/.claude/CLAUDE.md" spectral_block_claude "Claude Code"
+}
+
+install_cursor() {
+  warn_if_not_project_root "Cursor" || return 0
+
+  local target=".cursor/rules"
+  mkdir -p "$target"
+
+  local count=0
+  for agent in "$AGENTS_DIR"/*.md; do
+    [ -f "$agent" ] || continue
+    local name
+    name=$(basename "$agent" .md)
+    cp "$agent" "$target/spectral-${name}.mdc"
+    count=$((count + 1))
+  done
+  success "Cursor: $count rules -> $target"
+
+  upsert_spectral_block ".cursorrules" spectral_block_cursor "Cursor"
+}
+
+install_windsurf() {
+  warn_if_not_project_root "Windsurf" || return 0
+
+  local target=".windsurf/rules"
+  mkdir -p "$target"
+
+  local count=0
+  for agent in "$AGENTS_DIR"/*.md; do
+    [ -f "$agent" ] || continue
+    local name
+    name=$(basename "$agent" .md)
+    cp "$agent" "$target/spectral-${name}.md"
+    count=$((count + 1))
+  done
+  success "Windsurf: $count rules -> $target"
+
+  upsert_spectral_block ".windsurfrules" spectral_block_windsurf "Windsurf"
+}
+
+install_codex() {
+  warn_if_not_project_root "Codex" || return 0
+
+  local target=".codex/spectral"
+  mkdir -p "$target"
+
+  local count=0
+  for agent in "$AGENTS_DIR"/*.md; do
+    [ -f "$agent" ] || continue
+    cp "$agent" "$target/$(basename "$agent")"
+    count=$((count + 1))
+  done
+  success "Codex: $count agents -> $target"
+
+  upsert_spectral_block "codex.md" spectral_block_codex "Codex"
+}
+
+# ── Uninstall Functions ──────────────────────────────────────────────────────
+
+uninstall_claude_code() {
+  local target="$HOME/.claude/agents"
+  local removed=0
+  for name in "${AGENT_NAMES[@]}"; do
+    if [ -f "$target/$name.md" ]; then
+      rm -f "$target/$name.md"
+      removed=$((removed + 1))
+    fi
+  done
+
+  if [ "$removed" -gt 0 ]; then
+    success "Claude Code: Removed $removed agents from $target"
+  fi
+
+  remove_spectral_block "$HOME/.claude/CLAUDE.md" "Claude Code"
+}
+
+uninstall_cursor() {
+  local removed
+  removed=$(count_matching_files ".cursor/rules" "spectral-*.mdc")
+  if [ "$removed" -gt 0 ]; then
+    rm -f .cursor/rules/spectral-*.mdc
+    success "Cursor: Removed $removed rule files"
+  fi
+
+  remove_spectral_block ".cursorrules" "Cursor"
+}
+
+uninstall_windsurf() {
+  local removed
+  removed=$(count_matching_files ".windsurf/rules" "spectral-*.md")
+  if [ "$removed" -gt 0 ]; then
+    rm -f .windsurf/rules/spectral-*.md
+    success "Windsurf: Removed $removed rule files"
+  fi
+
+  remove_spectral_block ".windsurfrules" "Windsurf"
+}
+
+uninstall_codex() {
+  if [ -d ".codex/spectral" ]; then
+    rm -rf ".codex/spectral"
+    success "Codex: Removed .codex/spectral/"
+  fi
+
+  remove_spectral_block "codex.md" "Codex"
+}
+
+# ── Commands ─────────────────────────────────────────────────────────────────
+
+cmd_install() {
+  local targets=("$@")
+
+  # Handle --help / -h before banner
+  if [ ${#targets[@]} -gt 0 ] && [[ "${targets[0]}" == "-h" || "${targets[0]}" == "--help" ]]; then
+    echo "Usage: spectral install [tool...]"
+    echo ""
+    echo "Install agents to detected tools, or specify tools explicitly."
+    echo "Tools: claude-code, cursor, windsurf, codex"
+    echo ""
+    echo "Also updates instruction files (CLAUDE.md, .cursorrules, etc.)"
+    echo "so the AI knows the agents are available."
+    echo ""
+    echo "Run again after updating Spectral to refresh all agents and instructions."
+    return 0
+  fi
+
+  print_banner
+  ensure_agents
+  detect_tools
+
+  # If no targets specified, use all detected tools
+  if [ ${#targets[@]} -eq 0 ]; then
+    if [ ${#DETECTED_TOOLS[@]} -eq 0 ]; then
+      err "No AI coding tools detected on this machine."
+      echo ""
+      info "Supported: Claude Code, Cursor, Windsurf, Codex CLI"
+      info "Install a tool first, or specify a target explicitly:"
+      echo ""
+      echo "    spectral install claude-code"
+      echo "    spectral install cursor"
+      echo "    spectral install windsurf"
+      echo "    spectral install codex"
+      echo ""
+      exit 1
+    fi
+    targets=("${DETECTED_TOOLS[@]}")
+  fi
+
+  header "Detected tools"
+  for tool in "${DETECTED_TOOLS[@]}"; do
+    info "$tool"
+  done
+
+  header "Installing $(agent_count) agents"
+  echo ""
+
+  for target in "${targets[@]}"; do
+    case "$target" in
+      claude-code|claude) install_claude_code ;;
+      cursor)             install_cursor ;;
+      windsurf)           install_windsurf ;;
+      codex)              install_codex ;;
+      *)
+        warn "Unknown tool: $target (supported: claude-code, cursor, windsurf, codex)"
+        ;;
+    esac
+  done
+
+  echo ""
+  success "Done! Run 'spectral status' to verify."
+  echo ""
+}
+
+cmd_uninstall() {
+  local targets=("$@")
+
+  print_banner
+
+  if [ ${#targets[@]} -eq 0 ]; then
+    targets=("claude-code" "cursor" "windsurf" "codex")
+  fi
+
+  header "Uninstalling Spectral"
+  echo ""
+
+  for target in "${targets[@]}"; do
+    case "$target" in
+      claude-code|claude) uninstall_claude_code ;;
+      cursor)             uninstall_cursor ;;
+      windsurf)           uninstall_windsurf ;;
+      codex)              uninstall_codex ;;
+      *)
+        warn "Unknown tool: $target"
+        ;;
+    esac
+  done
+
+  echo ""
+  success "Done!"
+  echo ""
+}
+
+cmd_status() {
+  print_banner
+  detect_tools
+
+  header "Tool Detection"
+  echo ""
+
+  local total_agents=${#AGENT_NAMES[@]}
+
+  # Claude Code
+  if [[ " ${DETECTED_TOOLS[*]} " =~ " claude-code " ]]; then
+    local count=0
+    for name in "${AGENT_NAMES[@]}"; do
+      if [ -f "$HOME/.claude/agents/$name.md" ]; then
+        count=$((count + 1))
+      fi
+    done
+    if [ "$count" -gt 0 ]; then
+      success "Claude Code: ${GREEN}installed${NC} ($count/$total_agents agents)"
+    else
+      info "Claude Code: ${YELLOW}detected, not installed${NC}"
+    fi
+  else
+    info "Claude Code: ${DIM}not detected${NC}"
+  fi
+
+  # Cursor
+  if [[ " ${DETECTED_TOOLS[*]} " =~ " cursor " ]]; then
+    local count
+    count=$(count_matching_files ".cursor/rules" "spectral-*.mdc")
+    if [ "$count" -gt 0 ]; then
+      success "Cursor: ${GREEN}installed${NC} ($count/$total_agents rules)"
+    else
+      info "Cursor: ${YELLOW}detected, not installed${NC}"
+    fi
+  else
+    info "Cursor: ${DIM}not detected${NC}"
+  fi
+
+  # Windsurf
+  if [[ " ${DETECTED_TOOLS[*]} " =~ " windsurf " ]]; then
+    local count
+    count=$(count_matching_files ".windsurf/rules" "spectral-*.md")
+    if [ "$count" -gt 0 ]; then
+      success "Windsurf: ${GREEN}installed${NC} ($count/$total_agents rules)"
+    else
+      info "Windsurf: ${YELLOW}detected, not installed${NC}"
+    fi
+  else
+    info "Windsurf: ${DIM}not detected${NC}"
+  fi
+
+  # Codex
+  if [[ " ${DETECTED_TOOLS[*]} " =~ " codex " ]]; then
+    local count
+    count=$(count_matching_files ".codex/spectral" "*.md")
+    if [ "$count" -gt 0 ]; then
+      success "Codex: ${GREEN}installed${NC} ($count/$total_agents agents)"
+    else
+      info "Codex: ${YELLOW}detected, not installed${NC}"
+    fi
+  else
+    info "Codex: ${DIM}not detected${NC}"
+  fi
+
+  echo ""
+  info "Tool not detected? Specify it explicitly: spectral install <tool>"
+  echo ""
+}
+
+cmd_list() {
+  print_banner
+  ensure_agents
+
+  header "Available Agents"
+  echo ""
+
+  printf "  ${BOLD}%-24s %s${NC}\n" "AGENT" "FOCUS"
+  printf "  ${DIM}%-24s %s${NC}\n" "------------------------" "----------------------------------------"
+
+  for agent in "$AGENTS_DIR"/*.md; do
+    [ -f "$agent" ] || continue
+    local name
+    name=$(basename "$agent" .md)
+    # Extract the first content line of the description from YAML frontmatter
+    local desc
+    desc=$(awk '/^description:/{found=1; next} found && /^  [^ ]/{gsub(/^  /,""); print; exit}' "$agent")
+    if [ -z "$desc" ]; then
+      desc="(no description)"
+    fi
+    # Truncate to 50 chars
+    if [ ${#desc} -gt 50 ]; then
+      desc="${desc:0:47}..."
+    fi
+    printf "  %-24s %s\n" "$name" "$desc"
+  done
+
+  echo ""
+}
+
+cmd_help() {
+  print_banner
+
+  echo -e "  ${BOLD}USAGE${NC}"
+  echo "    spectral <command> [options]"
+  echo ""
+  echo -e "  ${BOLD}COMMANDS${NC}"
+  echo "    install [tool...]    Install agents to detected (or specified) tools"
+  echo "    uninstall [tool...]  Remove agents and instruction blocks"
+  echo "    status               Show which tools are detected and installed"
+  echo "    list                 List all available review agents"
+  echo "    help                 Show this help message"
+  echo "    version              Show version"
+  echo ""
+  echo -e "  ${BOLD}TOOLS${NC}"
+  echo "    claude-code          ~/.claude/agents/ + CLAUDE.md"
+  echo "    cursor               .cursor/rules/ + .cursorrules"
+  echo "    windsurf             .windsurf/rules/ + .windsurfrules"
+  echo "    codex                .codex/spectral/ + codex.md"
+  echo ""
+  echo -e "  ${BOLD}EXAMPLES${NC}"
+  echo "    spectral install                  # Auto-detect and install everywhere"
+  echo "    spectral install claude-code      # Install only for Claude Code"
+  echo "    spectral install cursor windsurf  # Install for specific tools"
+  echo "    spectral uninstall                # Remove from everywhere"
+  echo "    spectral status                   # Check what's installed"
+  echo ""
+  echo -e "  ${BOLD}UPDATING${NC}"
+  echo "    git pull && ./spectral install    # Re-run install to update agents"
+  echo ""
+}
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
+if [ $# -eq 0 ]; then
+  cmd_help
+  exit 0
+fi
+
+CMD="$1"
+shift
+
+case "$CMD" in
+  install)              cmd_install "$@" ;;
+  uninstall|remove)     cmd_uninstall "$@" ;;
+  status)               cmd_status ;;
+  list|ls)              cmd_list ;;
+  help|-h|--help)       cmd_help ;;
+  version|-v|--version) echo "spectral $VERSION" ;;
+  *)
+    err "Unknown command: $CMD"
+    echo ""
+    echo "  Run 'spectral help' for usage."
+    exit 1
+    ;;
+esac

@@ -40,54 +40,63 @@ Agents classify findings by severity (Critical / Warning / Nit), fix everything 
 
 ## Install
 
-### Claude Code
+```bash
+git clone https://github.com/eagleisbatman/spectral.git
+cd spectral
+./spectral install
+```
+
+The CLI auto-detects which AI tools you have and installs agents to the right locations. It also updates your instruction files (`CLAUDE.md`, `.cursorrules`, `.windsurfrules`, `codex.md`) so the AI knows the agents exist.
+
+> **Linux users:** If your tool isn't auto-detected (e.g. Flatpak/AppImage installs), specify it explicitly: `./spectral install cursor`
+
+### Install for specific tools
 
 ```bash
-git clone https://github.com/eagleisbatman/spectral.git /tmp/spectral
-bash /tmp/spectral/install/claude-code.sh
+./spectral install claude-code         # Just Claude Code
+./spectral install cursor windsurf     # Multiple tools
+./spectral install codex               # Just Codex CLI
 ```
 
-Then in Claude Code:
-```
-> Run the full-spectrum review
-> Run a security audit on src/auth/
-> Review this project's architecture
-```
-
-### Cursor
+### Check status
 
 ```bash
-# Run from your project root
-git clone https://github.com/eagleisbatman/spectral.git /tmp/spectral
-bash /tmp/spectral/install/cursor.sh
+./spectral status
 ```
 
-Reference with `@spectral-full-spectrum`, `@spectral-security-audit`, etc.
+```
+  + Claude Code: installed (9/9 agents)
+  + Cursor: installed (9/9 rules)
+  > Windsurf: not detected
+  > Codex: not detected
+```
 
-### Windsurf
+### Update
 
 ```bash
-# Run from your project root
-git clone https://github.com/eagleisbatman/spectral.git /tmp/spectral
-bash /tmp/spectral/install/windsurf.sh
+git pull
+./spectral install
 ```
 
-### Codex CLI
+Re-running `install` updates both agent files and instruction blocks.
+
+### Other commands
 
 ```bash
-# Run from your project root
-git clone https://github.com/eagleisbatman/spectral.git /tmp/spectral
-bash /tmp/spectral/install/codex.sh
+./spectral list                        # Show all available agents
+./spectral uninstall                   # Remove from all tools
+./spectral uninstall cursor            # Remove from specific tool
+./spectral help                        # Full usage
 ```
 
-Then: `codex "Follow the instructions in .codex/spectral/full-spectrum.md to review this project"`
+### Where things go
 
-### Uninstall
-
-```bash
-# Removes Spectral from all tools (run from project root for Cursor/Windsurf/Codex)
-bash /tmp/spectral/install/uninstall.sh
-```
+| Tool | Agents | Instructions updated |
+|---|---|---|
+| Claude Code | `~/.claude/agents/*.md` | `~/.claude/CLAUDE.md` |
+| Cursor | `.cursor/rules/spectral-*.mdc` | `.cursorrules` |
+| Windsurf | `.windsurf/rules/spectral-*.md` | `.windsurfrules` |
+| Codex CLI | `.codex/spectral/*.md` | `codex.md` |
 
 ### Manual
 
