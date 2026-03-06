@@ -43,12 +43,8 @@ Agents classify findings by severity (Critical / Warning / Nit), fix everything 
 ### Claude Code
 
 ```bash
-# One-liner: copy agents to ~/.claude/agents/
-bash <(curl -s https://raw.githubusercontent.com/eagleisbatman/spectral/main/install/claude-code.sh)
-
-# Or clone and run locally
-git clone https://github.com/eagleisbatman/spectral.git
-bash spectral/install/claude-code.sh
+git clone https://github.com/eagleisbatman/spectral.git /tmp/spectral
+bash /tmp/spectral/install/claude-code.sh
 ```
 
 Then in Claude Code:
@@ -61,16 +57,17 @@ Then in Claude Code:
 ### Cursor
 
 ```bash
-# Run from your project root — installs as Cursor rules
+# Run from your project root
 git clone https://github.com/eagleisbatman/spectral.git /tmp/spectral
 bash /tmp/spectral/install/cursor.sh
 ```
 
-Then reference with `@spectral-full-spectrum`, `@spectral-security-audit`, etc.
+Reference with `@spectral-full-spectrum`, `@spectral-security-audit`, etc.
 
 ### Windsurf
 
 ```bash
+# Run from your project root
 git clone https://github.com/eagleisbatman/spectral.git /tmp/spectral
 bash /tmp/spectral/install/windsurf.sh
 ```
@@ -78,15 +75,23 @@ bash /tmp/spectral/install/windsurf.sh
 ### Codex CLI
 
 ```bash
+# Run from your project root
 git clone https://github.com/eagleisbatman/spectral.git /tmp/spectral
 bash /tmp/spectral/install/codex.sh
 ```
 
-Then: `codex "Follow the full-spectrum agent in AGENTS.md to review this project"`
+Then: `codex "Follow the instructions in .codex/spectral/full-spectrum.md to review this project"`
+
+### Uninstall
+
+```bash
+# Removes Spectral from all tools (run from project root for Cursor/Windsurf/Codex)
+bash /tmp/spectral/install/uninstall.sh
+```
 
 ### Manual
 
-Just copy any `.md` file from `agents/` into your tool's prompt/rules directory. They're self-contained — no dependencies.
+Copy any `.md` file from `agents/` into your tool's prompt/rules directory. They're self-contained — no dependencies.
 
 ---
 

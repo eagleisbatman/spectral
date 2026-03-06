@@ -1,29 +1,46 @@
 #!/bin/bash
 # Spectral — Install for OpenAI Codex CLI
-# Appends agent prompts to AGENTS.md in the project root
+# Copies agents as individual instruction files to .codex/ directory.
+# Run this from your project root.
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENTS_DIR="$SCRIPT_DIR/../agents"
-TARGET_FILE="AGENTS.md"
 
-echo "Installing Spectral review prompts to $TARGET_FILE..."
+if [ ! -d "$AGENTS_DIR" ]; then
+  echo "Agents directory not found. Cloning spectral..."
+  TMPDIR=$(mktemp -d)
+  git clone --depth 1 https://github.com/eagleisbatman/spectral.git "$TMPDIR/spectral" 2>/dev/null
+  AGENTS_DIR="$TMPDIR/spectral/agents"
+  CLEANUP="$TMPDIR"
+fi
 
-echo "# Spectral Review Agents" > "$TARGET_FILE"
-echo "" >> "$TARGET_FILE"
-echo "Use these prompts to run focused code reviews. Copy the relevant section into your prompt." >> "$TARGET_FILE"
-echo "" >> "$TARGET_FILE"
+if [ ! -f "package.json" ] && [ ! -f "pyproject.toml" ] && [ ! -f "Cargo.toml" ] && [ ! -f "go.mod" ] && [ ! -f "Gemfile" ] && [ ! -d ".git" ]; then
+  echo "Warning: This doesn't look like a project root."
+  read -p "Continue anyway? (y/N) " confirm
+  [ "$confirm" != "y" ] && [ "$confirm" != "Y" ] && exit 1
+fi
 
+TARGET_DIR=".codex/spectral"
+mkdir -p "$TARGET_DIR"
+
+echo "Installing Spectral agents to $(pwd)/$TARGET_DIR..."
+echo ""
+
+count=0
 for agent in "$AGENTS_DIR"/*.md; do
-  filename=$(basename "$agent" .md)
-  echo "---" >> "$TARGET_FILE"
-  echo "" >> "$TARGET_FILE"
-  cat "$agent" >> "$TARGET_FILE"
-  echo "" >> "$TARGET_FILE"
-  echo "  Added: $filename"
+  filename=$(basename "$agent")
+  cp "$agent" "$TARGET_DIR/$filename"
+  echo "  + $filename"
+  count=$((count + 1))
 done
 
 echo ""
-echo "Done! Review prompts are in $TARGET_FILE."
-echo "Use with: codex 'Follow the full-spectrum agent instructions in AGENTS.md to review this project'"
+echo "Installed $count agents."
+echo ""
+echo "Usage with Codex CLI:"
+echo "  codex 'Follow the instructions in .codex/spectral/full-spectrum.md to review this project'"
+echo "  codex 'Use .codex/spectral/security-audit.md to audit the auth module'"
+
+[ -n "$CLEANUP" ] && rm -rf "$CLEANUP"
