@@ -12,7 +12,8 @@ Works with **Claude Code**, **Cursor**, and **Codex CLI**.
 
 | Agent | Focus | Question It Asks |
 |---|---|---|
-| **full-spectrum** | Security + Ops + Maintainability | "Is this production-ready?" |
+| **spectral-suite** | Orchestrator — dispatches specialists based on your stack | "Which reviews does this project need?" |
+| **triad-review** | Security + Ops + Maintainability in a single pass | "Is this production-ready?" |
 | **security-audit** | Vulnerabilities, auth, injection, data exposure | "How can this be exploited?" |
 | **architecture-review** | Coupling, cohesion, boundaries, patterns | "Will this scale and stay maintainable?" |
 | **performance-review** | N+1 queries, memory leaks, bundle size, bottlenecks | "What's slow and why?" |
@@ -25,14 +26,28 @@ Works with **Claude Code**, **Cursor**, and **Codex CLI**.
 
 ---
 
+## Methodology: The 3-Lens Approach
+
+Every Spectral agent applies 3 unbiased analytical lenses to its domain:
+
+| Lens | Perspective | Question |
+|---|---|---|
+| **Lens 1** | Adversarial / Attacker | "How does this break?" |
+| **Lens 2** | Ops / SRE | "How does this fail at 3 AM?" |
+| **Lens 3** | New Team Member / Maintainer | "How does this confuse?" |
+
+The agent clears its analytical frame between lenses, treating the code fresh each time. This prevents anchoring and ensures comprehensive coverage from fundamentally different perspectives.
+
+---
+
 ## How It Works
 
 Each agent follows the same autonomous loop:
 
 ```
 Phase 0: Orient    Detect stack, map scope, understand context
-Phase 1: Review    Find issues -> Fix them -> Build -> Test -> Repeat (max 3 cycles)
-Phase 2: Report    Structured verdict with findings, fixes, and recommendations
+Phase 1: Review    3 lenses -> Fix everything -> Build -> Test -> Repeat (max 3 cycles)
+Phase 2: Report    Structured verdict with findings per lens, fixes, and recommendations
 ```
 
 Agents classify findings by severity (Critical / Warning / Nit), fix everything they can, and produce a clear verdict: **PASS**, **PASS WITH CONDITIONS**, or **FAIL**.
@@ -55,7 +70,9 @@ The CLI auto-detects which tools you have and installs agents in the correct for
 | **Cursor** | `.cursor/rules/spectral-*.mdc` | `.mdc` rules with Cursor frontmatter (`description`, `alwaysApply: false`) |
 | **Codex CLI** | `AGENTS.md` | Appends agent instructions — [Codex auto-discovers this file](https://developers.openai.com/codex/guides/agents-md/) |
 
-It also updates instruction files (`~/.claude/CLAUDE.md`, `.cursorrules`, `AGENTS.md`) so the AI knows the agents exist.
+It also updates instruction files (`~/.claude/CLAUDE.md`, `.cursorrules`, `AGENTS.md`) so the AI knows the agents exist and includes routing hints for selecting the right agent.
+
+> **Upgrading from v1.x?** Run `spectral install` — it automatically cleans up renamed agents (`full-spectrum` → `triad-review`) and installs the new orchestrator (`spectral-suite`).
 
 > **Linux users:** If your tool isn't auto-detected (e.g. Flatpak/AppImage), specify it explicitly: `./spectral install cursor`
 
@@ -73,8 +90,8 @@ It also updates instruction files (`~/.claude/CLAUDE.md`, `.cursorrules`, `AGENT
 ```
 
 ```
-  + Claude Code: installed (10/10 agents)
-  + Cursor: installed (10/10 rules)
+  + Claude Code: installed (11/11 agents)
+  + Cursor: installed (11/11 rules)
   > Codex: detected, not installed
 ```
 
@@ -106,16 +123,17 @@ Copy any `.md` file from `agents/` into your tool's prompt/rules directory. They
 
 **Claude Code:**
 ```
-Run the full-spectrum review
-Run a security audit on src/auth/
-Review this project's architecture
+Run a spectral review                  # Launches spectral-suite orchestrator
+Run the triad review                   # Single-pass 3-lens review
+Run a security audit on src/auth/      # Domain-specific specialist
+Review this project's architecture     # Domain-specific specialist
 ```
 
-**Cursor:** Reference with `@spectral-full-spectrum`, `@spectral-security-audit`, etc.
+**Cursor:** Reference with `@spectral-spectral-suite`, `@spectral-triad-review`, `@spectral-security-audit`, etc.
 
 **Codex CLI:**
 ```bash
-codex "Run the full-spectrum review from AGENTS.md"
+codex "Run a spectral review"
 codex "Follow the security-audit instructions to audit this project"
 ```
 
@@ -123,11 +141,17 @@ codex "Follow the security-audit instructions to audit this project"
 
 ## Design Principles
 
+- **3 lenses, every agent.** Attacker, Ops, and Maintainer perspectives applied to each domain.
 - **Fix, don't just report.** Every finding gets a fix unless it requires a major rewrite.
+- **Fix-First Heuristic.** Mechanical fixes are auto-applied; judgment calls are batched for human input. Each agent knows which is which for its domain.
+- **Confidence tiers.** Findings tagged HIGH / MEDIUM / LOW. Low-confidence items are never auto-fixed — presented as "Possible: verify manually."
+- **No hand-waving.** Agents never say "likely handled" or "probably fine." They verify in code or flag as UNVERIFIED.
+- **Suppressions.** Each agent has domain-specific "do not flag" lists to reduce false positives (vendor code, test fixtures, intentional patterns).
 - **Iterative.** Up to 3 review cycles — each cycle narrows scope to files changed by previous fixes.
 - **Stack-agnostic.** Auto-detects your tech stack and adapts checks accordingly.
 - **Build-verified.** Always runs the build after fixes. Broken builds are not acceptable.
 - **Honest verdicts.** PASS / CONDITIONAL / FAIL. No hedging.
+- **Complete when cheap.** When marginal cost of completeness is near-zero, choose the complete approach.
 
 ---
 
@@ -135,7 +159,7 @@ codex "Follow the security-audit instructions to audit this project"
 
 1. Fork the repo
 2. Add or improve an agent in `agents/`
-3. Follow the existing structure (Phase 0 / Phase 1 / Phase 2)
+3. Follow the existing structure (Phase 0 / Phase 1 with 3 lenses / Phase 2)
 4. Submit a PR
 
 Agent ideas welcome — open an issue if you have a review lens you'd like to see.

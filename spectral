@@ -10,14 +10,15 @@ set -uo pipefail
 # We handle errors manually instead of set -e to avoid && short-circuit traps.
 # Every external command that matters is checked explicitly.
 
-VERSION="1.2.0"
+VERSION="2.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENTS_DIR="$SCRIPT_DIR/agents"
 SPECTRAL_TMPDIR=""
 
 # Agent names (single source of truth)
 AGENT_NAMES=(
-  full-spectrum
+  spectral-suite
+  triad-review
   security-audit
   architecture-review
   performance-review
@@ -28,6 +29,9 @@ AGENT_NAMES=(
   data-integrity
   database-review
 )
+
+# Stale agents from previous versions (cleaned up on install)
+STALE_AGENTS=(full-spectrum three-lens-review)
 
 # Colors (disabled if not a terminal)
 if [ -t 1 ]; then
@@ -180,8 +184,14 @@ spectral_block_claude() {
   cat << 'EOF'
 ## Spectral Review Agents
 
-You have access to Spectral review agents. Use them proactively after completing implementation tasks or when the user requests a review. Available agents:
-- **full-spectrum**: Comprehensive 3-lens review (security + ops + maintainability)
+You have access to Spectral review agents. Use them proactively after completing implementation tasks or when the user requests a review.
+
+When the user says "run a spectral review" or "review everything," use **spectral-suite**.
+For domain-specific reviews, use the matching specialist agent.
+
+Available agents:
+- **spectral-suite**: Orchestrator — dispatches specialists based on your stack
+- **triad-review**: Single-pass 3-lens review (security + ops + maintainability)
 - **security-audit**: Deep vulnerability hunting
 - **architecture-review**: Structural health and coupling analysis
 - **performance-review**: Bottleneck and resource usage analysis
@@ -198,8 +208,9 @@ spectral_block_cursor() {
   cat << 'EOF'
 ## Spectral Review Agents
 
-You have Spectral review agents available in .cursor/rules/. When the user asks for a code review, use the appropriate spectral rule:
-- @spectral-full-spectrum — full 3-lens review
+You have Spectral review agents available in .cursor/rules/. When the user says "run a spectral review" or "review everything," use @spectral-spectral-suite. For domain-specific reviews, use the matching specialist:
+- @spectral-spectral-suite — orchestrator, dispatches specialists based on stack
+- @spectral-triad-review — single-pass 3-lens review
 - @spectral-security-audit — security vulnerabilities
 - @spectral-architecture-review — structural health
 - @spectral-performance-review — bottlenecks
@@ -218,8 +229,12 @@ spectral_block_codex() {
 
 When the user asks for a code review, follow the instructions from the appropriate Spectral agent section below. Each agent operates autonomously: it finds issues, fixes them, runs the build, and re-reviews until the codebase passes its quality gate.
 
+When the user says "run a spectral review" or "review everything," use **spectral-suite**.
+For domain-specific reviews, use the matching specialist agent.
+
 Available agents:
-- **full-spectrum** — comprehensive 3-lens review (security + ops + maintainability)
+- **spectral-suite** — orchestrator, dispatches specialists based on stack
+- **triad-review** — single-pass 3-lens review (security + ops + maintainability)
 - **security-audit** — deep vulnerability hunting
 - **architecture-review** — structural health and coupling analysis
 - **performance-review** — bottleneck and resource usage analysis
@@ -304,6 +319,14 @@ install_claude_code() {
   done
   success "Claude Code: $count agents -> $target"
 
+  # Clean up stale agents from previous versions
+  for stale in "${STALE_AGENTS[@]}"; do
+    if [ -f "$target/$stale.md" ]; then
+      rm -f "$target/$stale.md"
+      info "Claude Code: Removed stale agent $stale.md"
+    fi
+  done
+
   upsert_spectral_block "$HOME/.claude/CLAUDE.md" spectral_block_claude "Claude Code"
 }
 
@@ -348,6 +371,14 @@ install_cursor() {
     count=$((count + 1))
   done
   success "Cursor: $count rules -> $target"
+
+  # Clean up stale agents from previous versions
+  for stale in "${STALE_AGENTS[@]}"; do
+    if [ -f "$target/spectral-$stale.mdc" ]; then
+      rm -f "$target/spectral-$stale.mdc"
+      info "Cursor: Removed stale rule spectral-$stale.mdc"
+    fi
+  done
 
   upsert_spectral_block ".cursorrules" spectral_block_cursor "Cursor"
 }
@@ -411,7 +442,7 @@ install_codex() {
 uninstall_claude_code() {
   local target="$HOME/.claude/agents"
   local removed=0
-  for name in "${AGENT_NAMES[@]}"; do
+  for name in "${AGENT_NAMES[@]}" "${STALE_AGENTS[@]}"; do
     if [ -f "$target/$name.md" ]; then
       rm -f "$target/$name.md"
       removed=$((removed + 1))
